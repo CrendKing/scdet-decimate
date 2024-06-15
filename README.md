@@ -1,24 +1,32 @@
-# SCDDecimate
+# SCDetDecimate
+
+Scene Change Detection + Frame Deduplication
 
 ```
-scdd.SCDDecimate(vnode clip, float low=0, float high, range)
+scdd.SCDetDecimate(vnode clip, float high, float low=0, buffer=30)
 ```
 
-Apply `std.PlaneStats()` on the input clip, then do the following based on the value of each frame's `PlaneStatsDiff` property:
+Requires the input clip to have the `PlaneStatsDiff` frame property, which is usually obtained with
+```
+input = clip.std.PlaneStats(clipb=clip.std.Trim(first=1))
+```
 
-1. If the frame's `PlaneStatsDiff < low`, remove the current frame from the clip, and add its duration to the next frame. Repeat this step for at most `range` times. If `range` is 0, this step doesn't occur.
-2. Set the `_SceneChangeNext` property to 1 if `PlaneStatsDiff >= high`. 0 otherwise.
+Set the `_SceneChangeNext` property to 1 if `PlaneStatsDiff >= high`. 0 otherwise. Same behavior as [SCDetect](https://github.com/vapoursynth/vs-miscfilters-obsolete/blob/master/src/miscfilters.cpp).
 
-This filter makes sure `high` is always in range of `(0, 1]`, `low` in range of `[0, high]`, `range` in range of `[0, 5]`. Out-of-range values are clamped.
+If the frame's `PlaneStatsDiff < low`, omit the current input frame from the output clip, and add its duration to the next frame. Repeat this step until a unique frame is encountered. Equivalent to ffmpeg's [mpdecimate](https://ffmpeg.org/ffmpeg-filters.html#mpdecimate) filter.
+
+A back buffer of frames is maintained to support random access from downstream.
+
+This filter makes sure `high` is always in range of `(0, 1]`, `low` in range of `[0, high]`. Minimum `buffer` is 30. Out-of-range values are clamped.
 
 ### Examples
 
 ```
-clip.scdd.SCDDecimate(low=0.0005, high=0.15, range=2)
+clip.scdd.SCDetDecimate(high=0.15, low=0.0005)
 ```
 Remove frames less than 0.05% different their next frame, repeat at most twice. Mark frames more than 15% different to their next frame as scene change.
 
 ```
-clip.scdd.SCDDecimate(low=0.05, high=0.15)
+clip.scdd.SCDetDecimate(high=0.15)
 ```
-Disable frame removal due to `range=0`, regardless of the `low` value. Scene change detection still happens.
+Effectively disable frame removal due to `low=0`. Scene change detection still happens.
