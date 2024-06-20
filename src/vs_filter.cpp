@@ -14,11 +14,12 @@ struct Context {
 
     int frameDurationNumSkipped;
 
+    std::string errorMessage;
+
     std::thread requestFramesThread;
     std::mutex mutex;
     std::condition_variable producerCv;
     std::condition_variable consumerCv;
-    bool isDraining;
 
     // FILE *logFile;
 };
@@ -34,11 +35,20 @@ auto VS_CC filterGetFrame(int n, int activationReason, void *instanceData, void 
 
     std::unique_lock<std::mutex> lock(ctx->mutex);
 
-    while (n >= ctx->queueBase + static_cast<int>(ctx->frameQueue.size()) && !ctx->isDraining) {
+    while (true) {
+        if (!ctx->errorMessage.empty()) {
+            vsapi->setFilterError(ctx->errorMessage.c_str(), frameCtx);
+            return nullptr;
+        }
+
+        if (n < ctx->queueBase + static_cast<int>(ctx->frameQueue.size())) {
+            break;
+        }
+
         ctx->consumerCv.wait(lock);
     }
 
-    const VSFrame *frame = ctx->isDraining ? ctx->frameQueue.back() : ctx->frameQueue[n - ctx->queueBase];
+    const VSFrame *frame = ctx->frameQueue[n - ctx->queueBase];
     vsapi->addFrameRef(frame);
     return frame;
 }
@@ -48,7 +58,7 @@ auto VS_CC filterFree(void *instanceData, VSCore *core, const VSAPI *vsapi) -> v
 
     {
         const std::unique_lock<std::mutex> lock(ctx->mutex);
-        ctx->isDraining = true;
+        ctx->errorMessage = "filterFree";
     }
     ctx->producerCv.notify_one();
     // filterFree() is only called after all filterGetFrame() has finished, so no need to notify consumer cv
@@ -68,7 +78,7 @@ auto VS_CC frameDone(void *instanceData, const VSFrame *frame, int n, VSNode *no
     if (errorMsg != nullptr) {
         {
             const std::unique_lock<std::mutex> lock(ctx->mutex);
-            ctx->isDraining = true;
+            ctx->errorMessage = errorMsg;
         }
         ctx->producerCv.notify_one();
         ctx->consumerCv.notify_all();
@@ -121,7 +131,7 @@ auto requestFrames(Context *ctx) -> void {
             std::unique_lock<std::mutex> lock(ctx->mutex);
 
             while (ctx->maxGetFrameNo < ctx->queueBase + static_cast<int>(ctx->frameQueue.size()) || ctx->processedFrameNo < requestFrameNo - 1) {
-                if (ctx->isDraining) {
+                if (!ctx->errorMessage.empty()) {
                     return;
                 }
 
@@ -151,7 +161,7 @@ auto VS_CC filterCreate(const VSMap *in, VSMap *out, void *userData, VSCore *cor
 
     ctx->frameDurationNumSkipped = 0;
 
-    ctx->isDraining = false;
+    ctx->errorMessage.clear();
 
     // ctx->logFile = _fsopen("Log.log", "w", _SH_DENYNO);
 
