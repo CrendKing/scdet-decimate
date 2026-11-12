@@ -7,11 +7,17 @@ sources = files(
     'src' / 'vs_filter.cpp',
 )
 
-vapoursynth_dep = dependency('vapoursynth', version: '>= 56')
+incdir = include_directories(
+    run_command(
+        get_option('vapoursynth_dir') / '.venv/Scripts/python',
+        '-m', 'vapoursynth', 'get-include',
+        check: true,
+    ).stdout().strip(),
+)
 
 shared_library(
     'scdet_decimate',
     sources,
-    dependencies: vapoursynth_dep,
+    include_directories: incdir,
     cpp_pch: 'pch/pch.h',
 )
